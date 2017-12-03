@@ -1,15 +1,23 @@
 package com.gc.controller;
 
+import org.springframework.security.crypto.bcrypt.BCrypt;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.SessionAttributes;
 import org.springframework.web.servlet.ModelAndView;
+
+import com.gc.dto.*;
 
 // Step 1 import sql
 import java.sql.*;
 import java.util.ArrayList;
+import java.util.List;
+
+import javax.servlet.http.HttpSession;
 
 /*
  * author: Jenna Price
@@ -17,119 +25,77 @@ import java.util.ArrayList;
  */
 
 @Controller
+@SessionAttributes({"authenticated", "customername"})
 public class HomeController {
-	
+	private JDCBImpl database = new JDCBImpl();
 	
 	// this is an example showing how to take data from a form and just add it to a page
-	@RequestMapping(value = "/submitform", method = RequestMethod.POST)
-	public String submitForm(Model model, @RequestParam("customerID") String custID,
-			@RequestParam("companyName") String comp, @RequestParam("contactName") String contact) {
-
-		model.addAttribute("addDataToPage", custID + " " + comp + " " + contact);
-		return "newPage";
+	@RequestMapping("/")	public String homepage(HttpSession hSession) {
+		hSession.setAttribute("authenticated", false);
+		return "index";
 	}
-
-	@RequestMapping("/welcome")
-	public ModelAndView helloWorld() throws ClassNotFoundException, SQLException {
-
-		// prep for step # 3
-		String url = "jdbc:mysql://localhost:3306/northwind";
-		// put your own username and password for mysql here
-		String userName = "roo";
-		String password = "admi";
-		String query = "select * from products";
-
-		// Step # 2: Load and register the driver
-		Class.forName("com.mysql.jdbc.Driver");
-
-		// Step # 3 : Create Connection
-		Connection con = DriverManager.getConnection(url, userName, password);
-
-		// Step 4 : Create Statment
-		Statement st = con.createStatement();
-
-		// Step 5 : Retrieve results
-		ResultSet rs = st.executeQuery(query);
-
-		ArrayList<String> list = new ArrayList<String>();
-		// Step 6: Process Results (optional)
-		while (rs.next()) {
-
-			String productID = rs.getString(1);
-			String prodName = rs.getString(2);
-			String supplierID = rs.getString(3);
-
-			list.add(productID + " " + prodName + " " + supplierID);
-
-		}
-
-		return new ModelAndView("welcome", "message", list);
+	@RequestMapping("/index")	public String returnToHomepage(HttpSession hSession) {
+		hSession.setAttribute("authenticated", false);
+		return "index";
 	}
-
-	@RequestMapping(value = "/add", method = RequestMethod.POST)
-	public ModelAndView test(@RequestParam("customerID") String custID, @RequestParam("companyName") String comp,
-			@RequestParam("contactName") String contact) throws ClassNotFoundException, SQLException {
-		// prep for step # 3
-		String url = "jdbc:mysql://localhost:3306/northwind";
-		String userName = "jennaprice";
-		String password = "jennaprice";
-		// String query = "select * from customers";
-
-		// Step # 2: Load and register the driver
-		Class.forName("com.mysql.jdbc.Driver");
-
-		// Step # 3 : Create Connection
-		Connection con = DriverManager.getConnection(url, userName, password);
 		
-		// instead of hardcoding these values we can use a prepared statement
-		String preparedSql = "insert into customers(CustomerID, CompanyName, ContactName)" + "values(?,?,?)";
-		PreparedStatement ps = con.prepareStatement(preparedSql);
-		ps.setString(1, custID);
-		ps.setString(2, comp);
-		ps.setString(3, contact);
-		ps.execute();
-
-		return new ModelAndView("test", "testing", "Just testing stuff");
+	@RequestMapping("/register")
+	public String registration() {
+		return "register";
 	}
-
-	@RequestMapping("/update")
-	public ModelAndView dbUpdate() throws ClassNotFoundException, SQLException {
-		// prep for step # 3
-		String url = "jdbc:mysql://localhost:3306/northwind";
-		String userName = "root";
-		String password = "admin";
-		// String query = "select * from products";
-
-		// Step # 2: Load and register the driver
-		Class.forName("com.mysql.jdbc.Driver");
-
-		// Step # 3 : Create Connection
-		Connection con = DriverManager.getConnection(url, userName, password);
-
-		String sql = "update customers set CustomerID= 3456, CompanyName='Grand Circus', ContactName='Merc' where ContactName ='Help'";
-		Statement st = con.createStatement();
-		int rowCount = st.executeUpdate(sql);
-		return new ModelAndView("test", "testing", rowCount);
+	
+	@RequestMapping(value = "/login", method = RequestMethod.POST)
+	public ModelAndView loginCustomer(@RequestParam("emailaddress") String emailAddress,
+			@RequestParam("password") String entered_password, Model model, HttpSession hSession, @ModelAttribute("authenticated") boolean authenticated )throws ClassNotFoundException, SQLException {
+		UserDto user = new UserDto(emailAddress);
+		user = (UserDto) database.searchByEmail(user);
+		
+		if(user.getFullName() == null) {
+			String warning = "<p class='warning'> You do not have an account associated with this email address."+
+		"Please create an account below or <a href='index.html> click here  </a> to try a different account. </p>";
+			return new ModelAndView("register", "noAccountMessage", warning);
+		}
+		boolean passwordMatch = BCrypt.checkpw(entered_password, user.getPw_hash());
+		if(!passwordMatch) {
+			return new ModelAndView("index", "update", "<p> Please try again, your password didn't match. </p>");		
+		}
+		user.setAuthenticated(true);
+		hSession.setAttribute("authenticated", true);
+		return new ModelAndView("welcome", "customername", user.getFullName());
 	}
+	
 
-	@RequestMapping("/delete")
-	public ModelAndView dbDelete() throws ClassNotFoundException, SQLException {
-		// prep for step # 3
-		String url = "jdbc:mysql://localhost:3306/northwind";
-		String userName = "root";
-		String password = "admin";
-		// String query = "select * from products";
-
-		// Step # 2: Load and register the driver
-		Class.forName("com.mysql.jdbc.Driver");
-
-		// Step # 3 : Create Connection
-		Connection con = DriverManager.getConnection(url, userName, password);
-
-		String sql = "delete from customers where ContactName='Merc'";
-		Statement st = con.createStatement();
-		int rowCount = st.executeUpdate(sql);
-		return new ModelAndView("test", "testing", rowCount);
+	@RequestMapping(value = "/submitform", method = RequestMethod.POST)
+	public ModelAndView registerCustomer(@RequestParam("customername") String customerName, @RequestParam("emailaddress") String emailAddress,
+			@RequestParam("password") String password, HttpSession hSession) throws ClassNotFoundException, SQLException {
+		UserDto user = new UserDto(customerName, emailAddress, password, false);
+		
+		database.insert(user);
+		hSession.setAttribute("authenticated", true);
+		
+		return new ModelAndView("welcome", "customername", customerName);
 	}
+	
+	@RequestMapping("/welcome")
+	public ModelAndView welcomePage(HttpSession hSession, @ModelAttribute("authenticated") boolean authenticated, Model model) throws ClassNotFoundException, SQLException {
+		
+		
+		/*if (!authenticated) {
+			return new ModelAndView("index", "update", "<p class=\"warning\">Your session has expired, please login again.</p>");
+		}*/
+		
+		List<DBRecordDto> productList = database.listAll();
+		ItemDto product = (ItemDto) productList.get(0);
+		System.out.println("Product List " + product.getName());
+		return new ModelAndView("welcome", "table", productList);
+	}
+	
+	@RequestMapping("/purchase")
+	public ModelAndView placeItemInCart(HttpSession hSession, @ModelAttribute("authenticated") boolean authenticated, @RequestParam("name") String name) {
+	return new ModelAndView("welcome", "update", "<p> We have added " + name + " to your cart.</p>");
+	}
+	
+	
+	
 
 }
